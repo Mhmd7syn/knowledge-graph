@@ -1341,6 +1341,15 @@
       }
     });
 
+    // Ensure links open in a new tab without leaving the application
+    targetEl.querySelectorAll('a').forEach(a => {
+      const href = a.getAttribute('href');
+      if (href && !href.startsWith('#')) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
+
     // Make checkpoint task checkboxes interactive
     targetEl.querySelectorAll('input[type="checkbox"]').forEach((cb, cbIndex) => {
       cb.removeAttribute('disabled');
@@ -3259,6 +3268,18 @@
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.station-overflow-container')) {
         closeAllOverflowDropdowns();
+      }
+    });
+
+    // Ensure clicking markdown links opens them in a new tab
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a');
+      if (!link) return;
+      const href = link.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+      if (link.closest('.markdown-body')) {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
       }
     });
 

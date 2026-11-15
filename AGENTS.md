@@ -7,10 +7,12 @@ You are an AI coding and content agent assisting with the **Knowledge Graph** re
 ## 1. Starter Node Scoping
 - **Launchpad Only:** Station `info.md` files provide only foundational orientation, core mental models, and initial setup—never encyclopedic or advanced mastery of child topics.
 - **Delegate Depth:** Advanced specializations, deep tooling, and detailed sub-disciplines belong strictly in child subfolders.
+- **Time Budget Cap:** Expected learning time for any single node must be strictly under 2 hours across theory, checkpoints, and the practical lab. Decompose any station exceeding 2 hours into child stations.
 
 ## 2. High-Yield Sourcing (3–4 Links Cap)
 - **Hard Cap:** Strictly 3 to 4 links per station (e.g., 1 practice/sandbox, 1 quickstart/cheatsheet, 1 focused guide). Avoid link dumping.
 - **Practice & Brevity First:** Prioritize short, highly targeted resources, interactive platforms, active drills, and cheatsheets directly mapped to the node's learning outcomes over long-winded tutorials.
+- **Non-Redundant Coverage:** Links must cover all learning outcomes without repeating each other. Each source must target a distinct outcome or drill.
 - **Module Scoping for Long Courses:** If a comprehensive or multi-week course is the best resource, explicitly annotate the link label with the exact modules, weeks, or lessons to take (e.g., `[Course Name (Module X: Topic)]`) rather than prescribing the full course.
 
 ## 3. Formatting & Content Separation

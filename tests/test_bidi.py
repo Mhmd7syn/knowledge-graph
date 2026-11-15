@@ -75,6 +75,11 @@ class TestBiDiSupport(unittest.TestCase):
         self.assertIn("querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote')", self.js_content)
         self.assertIn("el.setAttribute('dir', 'auto');", self.js_content)
 
+    def test_js_render_markdown_opens_links_in_new_tab(self):
+        """Verify renderMarkdownContent sets target='_blank' and rel='noopener noreferrer' on links."""
+        self.assertIn("a.setAttribute('target', '_blank');", self.js_content)
+        self.assertIn("a.setAttribute('rel', 'noopener noreferrer');", self.js_content)
+
 
 if __name__ == "__main__":
     unittest.main()
