@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import json
+import math
 import socket
 import base64
 import shutil
@@ -569,261 +570,181 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
 
         return "\n".join(doc_lines), toc
 
-    CYCLE_PATTERN = ["high", "normal", "low", "high", "normal", "high"]
-    CYCLE_SLOTS = ["high", "normal", "low", "high", "normal", "high"]
-    _global_recommendation_step = 0
+    PRIORITY_WEIGHTS = {
+        "high": 2.0,
+        "normal": 1.0,
+        "low": 0.5,
+    }
 
-    def _get_queue_file(self) -> Path:
-        return GRAPH_DIR.parent / ".recommendation_queue.json"
+    def _build_recommended_node(self, folder: Path, is_curr: bool = False) -> dict:
+        canonical_folder, is_shortcut, canonical_rel = self._resolve_shortcut(folder)
+        rel_path = folder.relative_to(GRAPH_DIR).as_posix() if folder != GRAPH_DIR else ""
+        default_title = folder.name.replace("-", " ").replace("_", " ").title() if rel_path else "Root"
+        info_file = canonical_folder / "info.md"
+        title, badge, status, priority = self._parse_info_md(info_file, default_title)
+        breadcrumbs = self._build_breadcrumbs(folder)
+        category = breadcrumbs[-2]["title"] if len(breadcrumbs) > 1 else "Root"
 
-    def _load_recommendation_queue(self) -> dict:
-        """Load minimal persistent recommendation queue from root (.recommendation_queue.json)."""
-        legacy_file = GRAPH_DIR / ".recommendation_queue.json"
-        if legacy_file.exists():
-            try:
-                legacy_file.unlink()
-            except Exception:
-                pass
-
-        queue_file = self._get_queue_file()
-        default_data = {
-            "pattern": list(self.CYCLE_PATTERN),
-            "current_index": 0
+        return {
+            "id": folder.name if rel_path else "root",
+            "title": title,
+            "badge": badge,
+            "status": status,
+            "priority": priority,
+            "tier": None,
+            "isShortcut": is_shortcut,
+            "canonicalRelPath": canonical_rel if is_shortcut else rel_path,
+            "relPath": rel_path,
+            "category": category,
+            "breadcrumbs": breadcrumbs,
+            "isCurrentNode": is_curr
         }
-        if not queue_file.exists():
-            return default_data
-        try:
-            with open(queue_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                pat = data.get("pattern", self.CYCLE_PATTERN)
-                if isinstance(pat, list) and pat:
-                    pattern = [str(p).lower() for p in pat]
-                else:
-                    pattern = list(self.CYCLE_PATTERN)
-                raw_idx = data.get("current_index", 0)
-                current_idx = int(raw_idx) if isinstance(raw_idx, (int, str)) and str(raw_idx).isdigit() else 0
-                return {
-                    "pattern": pattern,
-                    "current_index": current_idx % len(pattern)
-                }
-        except Exception as e:
-            print(f"[Warning reading recommendation queue]: {e}", file=sys.stderr)
-        return default_data
 
-    def _save_recommendation_queue(self, queue_data: dict):
-        """Save minimal recommendation queue to root (.recommendation_queue.json)."""
-        queue_file = self._get_queue_file()
-        try:
-            pattern = queue_data.get("pattern", self.CYCLE_PATTERN)
-            curr_idx = queue_data.get("current_index", 0)
-            current_index = int(curr_idx) % len(pattern)
-            with open(queue_file, "w", encoding="utf-8") as f:
-                json.dump({"pattern": pattern, "current_index": current_index}, f, indent=2)
-        except Exception as e:
-            print(f"[Warning saving recommendation queue]: {e}", file=sys.stderr)
-
-    def _collect_uncompleted_candidates(self, start_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
+    def _find_next_node(self, start_dir: Path | None = None, current_path: str = "") -> dict:
         """
-        Traverse the graph under start_dir via BFS and collect all uncompleted nodes partitioned by priority.
-        Returns: (high_candidates, normal_candidates, low_candidates)
+        Stateless, top-down recursive descent recommendation engine based on Effective Progress:
+        - For any station/folder N: Progress(N) = (Completed(N) / Total(N)) / Priority_Weight(N)
+        - Priority Weights: high: 2.0, normal: 1.0, low: 0.5 (default: 1.0)
+        - Completed: status == 'completed'
+        - Completed & Total counts computed per subtree.
+        - Traversal:
+          1. Start at start_dir (defaults to GRAPH_DIR root).
+          2. If start_dir itself is an uncompleted station (not root), return it as Next Node.
+          3. For each child station of the current node, compute completed and total counts in subtree.
+             Filter out children that have no pending work (completed == total).
+          4. Sort remaining eligible children by:
+             (completed / (total * weight), -weight, title.lower())
+          5. Pick top-ranked child:
+             - If completed: recurse into its children.
+             - If uncompleted: return as Next Node.
+          6. If entire graph has no pending work, return allCompleted: True.
         """
-        def get_subdirs(d: Path) -> list[Path]:
-            if not d.exists() or not d.is_dir():
-                return []
-            subdirs = [p for p in d.iterdir() if p.is_dir() and not p.name.startswith((".", "__"))]
-            return sorted(subdirs, key=lambda x: x.name.lower())
+        if start_dir is None:
+            start_dir = GRAPH_DIR
 
-        canonical_start, is_start_sc, start_target_rel = self._resolve_shortcut(start_dir)
-        visited_canonical = set()
-
-        high_candidates = []
-        normal_candidates = []
-        low_candidates = []
-
-        def build_candidate_node(dir_path: Path, is_curr: bool) -> dict:
-            c_canon, is_sc, target_rel = self._resolve_shortcut(dir_path)
-            info_file = c_canon / "info.md"
-            default_t = dir_path.name.replace("-", " ").replace("_", " ").title() if dir_path != GRAPH_DIR else "Root"
-            t, b, s, p = self._parse_info_md(info_file, default_t)
-            breadcrumbs = self._build_breadcrumbs(dir_path)
-            category = breadcrumbs[-2]["title"] if len(breadcrumbs) > 1 else "Root"
-            rel_p = dir_path.relative_to(GRAPH_DIR).as_posix() if dir_path != GRAPH_DIR else ""
-            return {
-                "id": dir_path.name if dir_path != GRAPH_DIR else "root",
-                "title": t,
-                "badge": b,
-                "status": s,
-                "priority": p,
-                "isShortcut": is_sc,
-                "canonicalRelPath": target_rel if is_sc else rel_p,
-                "relPath": rel_p,
-                "category": category,
-                "breadcrumbs": breadcrumbs,
-                "isCurrentNode": is_curr
-            }
-
-        def bucket_candidate(cand: dict):
-            prio = cand.get("priority", "normal")
-            if prio == "high":
-                high_candidates.append(cand)
-            elif prio == "low":
-                low_candidates.append(cand)
-            else:
-                normal_candidates.append(cand)
-
-        # Scoped context: Check the current node first (if not root)
-        if start_dir != GRAPH_DIR:
-            visited_canonical.add(canonical_start.resolve())
-            curr_cand = build_candidate_node(start_dir, is_curr=True)
-            if curr_cand["status"] != "completed":
-                bucket_candidate(curr_cand)
-
-        # BFS queue over descendants
-        queue = deque(get_subdirs(canonical_start))
-
-        while queue:
-            curr = queue.popleft()
-            canonical_curr, is_sc, target_rel = self._resolve_shortcut(curr)
-            resolved_canon = canonical_curr.resolve()
-            if resolved_canon in visited_canonical:
-                continue
-            visited_canonical.add(resolved_canon)
-
-            desc_cand = build_candidate_node(curr, is_curr=False)
-            if desc_cand["status"] != "completed":
-                bucket_candidate(desc_cand)
-
-            queue.extend(get_subdirs(canonical_curr))
-
-        return high_candidates, normal_candidates, low_candidates
-
-    def _record_node_completion(self, node_dir: Path):
-        """
-        When a node is marked completed:
-        If its priority matches the current needed index, increase the index.
-        Otherwise discard the change.
-        """
-        c_canon, _, _ = self._resolve_shortcut(node_dir)
-        _, _, _, prio = self._parse_info_md(c_canon / "info.md", node_dir.name)
-        node_prio = prio.lower() if prio in ("high", "normal", "low") else "normal"
-
-        q_data = self._load_recommendation_queue()
-        pattern = q_data.get("pattern", self.CYCLE_PATTERN)
-        curr_idx = q_data.get("current_index", 0) % len(pattern)
-        needed_prio = pattern[curr_idx]
-
-        if node_prio == needed_prio:
-            new_idx = (curr_idx + 1) % len(pattern)
-            self._save_recommendation_queue({
-                "pattern": pattern,
-                "current_index": new_idx
-            })
-            print(f"[Cadence advanced]: Completed '{node_prio}' matched needed priority '{needed_prio}'. Index advanced to {new_idx}.")
-        else:
-            print(f"[Cadence kept]: Completed '{node_prio}' did not match needed '{needed_prio}'. Discarded index change.")
-
-    def _find_next_node_bfs(self, start_dir: Path, step: int | None = None) -> dict:
-        """
-        Priority-weighted recommendation engine:
-        - Reads global queue (pattern and current_index).
-        - Gathers first uncompleted high, normal, low nodes under start_dir.
-        - If needed priority has no node, advances index until finding an available candidate.
-        - If no nodes exist for all priorities, marks as all completed.
-        """
         if not start_dir.exists() or not start_dir.is_dir():
-            s_val = (step % 6) if step is not None else 0
             return {
                 "found": False,
                 "isCurrentNode": False,
                 "allCompleted": False,
                 "node": None,
-                "pool": [],
-                "cycleStep": s_val,
-                "cycleTarget": self.CYCLE_PATTERN[s_val],
-                "cycleSlot": self.CYCLE_SLOTS[s_val],
-                "lastCompletedSlot": None,
-                "nextSlot": self.CYCLE_SLOTS[(s_val + 1) % 6],
-                "cyclePattern": self.CYCLE_PATTERN,
-                "cycleSlots": self.CYCLE_SLOTS,
-                "poolCounts": {"high": 0, "normal": 0, "low": 0},
-                "totalCandidates": 0,
                 "message": "Station directory does not exist."
             }
 
-        q_data = self._load_recommendation_queue()
-        pattern = q_data.get("pattern", self.CYCLE_PATTERN)
-        saved_idx = q_data.get("current_index", 0) % len(pattern)
-        curr_idx = (step % len(pattern)) if step is not None else saved_idx
+        # If start_dir is a specific station (not root) and is uncompleted, it is the next node
+        if start_dir != GRAPH_DIR:
+            c_start, _, _ = self._resolve_shortcut(start_dir)
+            _, _, s_stat, _ = self._parse_info_md(c_start / "info.md", start_dir.name)
+            if s_stat != "completed":
+                node_dict = self._build_recommended_node(start_dir, is_curr=True)
+                return {
+                    "found": True,
+                    "isCurrentNode": True,
+                    "allCompleted": False,
+                    "node": node_dict,
+                    "message": None
+                }
 
-        high_cands, normal_cands, low_cands = self._collect_uncompleted_candidates(start_dir)
-        total_candidates = len(high_cands) + len(normal_cands) + len(low_cands)
+        def compute_subtree(folder: Path, visited: set) -> dict:
+            c_folder, is_sc, target_rel = self._resolve_shortcut(folder)
+            canon_res = c_folder.resolve()
+            if canon_res in visited:
+                return {
+                    "folder": folder,
+                    "title": folder.name,
+                    "status": "completed",
+                    "priority": "normal",
+                    "weight": 1.0,
+                    "is_completed": True,
+                    "completed": 0,
+                    "total": 0,
+                    "children": []
+                }
+            visited.add(canon_res)
 
-        if total_candidates == 0:
-            eff_slot = pattern[curr_idx]
-            prev_slot = pattern[(curr_idx - 1) % len(pattern)]
-            nxt_slot = pattern[(curr_idx + 1) % len(pattern)]
+            rel_p = folder.relative_to(GRAPH_DIR).as_posix() if folder != GRAPH_DIR else ""
+            default_t = folder.name.replace("-", " ").replace("_", " ").title() if rel_p else "Root"
+            info_file = c_folder / "info.md"
+            t, b, s, p = self._parse_info_md(info_file, default_t)
+            weight = self.PRIORITY_WEIGHTS.get(p, 1.0)
+            is_comp = (s == "completed")
+
+            child_subtrees = []
+            if c_folder.exists() and c_folder.is_dir():
+                subdirs = [d for d in c_folder.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]
+                for d in sorted(subdirs, key=lambda x: x.name.lower()):
+                    c_sub = compute_subtree(d, set(visited))
+                    if c_sub["total"] > 0:
+                        child_subtrees.append(c_sub)
+
+            self_total = 1 if folder != GRAPH_DIR else 0
+            self_comp = 1 if (is_comp and folder != GRAPH_DIR) else 0
+
+            tot = self_total + sum(c["total"] for c in child_subtrees)
+            comp = self_comp + sum(c["completed"] for c in child_subtrees)
+
+            return {
+                "folder": folder,
+                "title": t,
+                "badge": b,
+                "status": s,
+                "priority": p,
+                "weight": weight,
+                "is_completed": is_comp,
+                "completed": comp,
+                "total": max(1, tot) if folder != GRAPH_DIR else tot,
+                "children": child_subtrees
+            }
+
+        root_stats = compute_subtree(start_dir, set())
+
+        def descend(curr_stats: dict) -> Path | None:
+            eligible = [c for c in curr_stats["children"] if c["completed"] < c["total"]]
+            if not eligible:
+                return None
+
+            eligible.sort(key=lambda c: (
+                c["completed"] / (c["total"] * c["weight"]),
+                -c["weight"],
+                c["title"].lower()
+            ))
+
+            for candidate in eligible:
+                if candidate["is_completed"]:
+                    res = descend(candidate)
+                    if res is not None:
+                        return res
+                else:
+                    return candidate["folder"]
+
+            return None
+
+        chosen_folder = descend(root_stats)
+
+        if not chosen_folder:
             return {
                 "found": False,
                 "isCurrentNode": False,
                 "allCompleted": True,
                 "node": None,
-                "pool": [],
-                "cycleStep": curr_idx,
-                "cycleTarget": pattern[curr_idx],
-                "cycleSlot": eff_slot,
-                "lastCompletedSlot": prev_slot,
-                "nextSlot": nxt_slot,
-                "cyclePattern": pattern,
-                "cycleSlots": self.CYCLE_SLOTS,
-                "poolCounts": {"high": 0, "normal": 0, "low": 0},
-                "totalCandidates": 0,
                 "message": "All stations in this section completed!"
             }
 
-        first_high = high_cands[0] if high_cands else None
-        first_normal = normal_cands[0] if normal_cands else None
-        first_low = low_cands[0] if low_cands else None
-
-        chosen_node = None
-        for _ in range(len(pattern)):
-            needed_prio = pattern[curr_idx]
-            if needed_prio == "high" and first_high:
-                chosen_node = first_high
-                break
-            elif needed_prio == "normal" and first_normal:
-                chosen_node = first_normal
-                break
-            elif needed_prio == "low" and first_low:
-                chosen_node = first_low
-                break
-            else:
-                curr_idx = (curr_idx + 1) % len(pattern)
-
-        cycle_slot = pattern[curr_idx]
-        prev_slot = pattern[(curr_idx - 1) % len(pattern)]
-        next_slot = pattern[(curr_idx + 1) % len(pattern)]
+        rel_p = chosen_folder.relative_to(GRAPH_DIR).as_posix() if chosen_folder != GRAPH_DIR else ""
+        is_curr = bool(current_path and rel_p == current_path.replace("\\", "/").strip("/"))
+        node_dict = self._build_recommended_node(chosen_folder, is_curr=is_curr)
 
         return {
             "found": True,
-            "isCurrentNode": chosen_node.get("isCurrentNode", False) if chosen_node else False,
+            "isCurrentNode": is_curr,
             "allCompleted": False,
-            "node": chosen_node,
-            "pool": [chosen_node] if chosen_node else [],
-            "cycleStep": curr_idx,
-            "cycleTarget": pattern[curr_idx],
-            "cycleSlot": cycle_slot,
-            "lastCompletedSlot": prev_slot,
-            "nextSlot": next_slot,
-            "cyclePattern": pattern,
-            "cycleSlots": self.CYCLE_SLOTS,
-            "poolCounts": {
-                "high": len(high_cands),
-                "normal": len(normal_cands),
-                "low": len(low_cands)
-            },
-            "totalCandidates": total_candidates
+            "node": node_dict,
+            "message": None
         }
+
+    def _find_next_node_bfs(self, start_dir: Path, step: int | None = None) -> dict:
+        """Stateless next-node recommendation engine (backwards compatibility wrapper)."""
+        return self._find_next_node(start_dir)
 
     def _search_graph(self, query: str, limit: int = 30) -> tuple[list[dict], int]:
         """
@@ -1248,19 +1169,13 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
         self._send_json(200, {"stations": stations})
 
     def _handle_api_get_next_node(self, query_string: str):
-        """Find the next uncompleted station using priority-weighted BFS from the requested node."""
+        """Find the next uncompleted station using stateless recursive descent."""
         params = urllib.parse.parse_qs(query_string)
         node_path_param = params.get("path", [""])[0]
-        raw_step = params.get("step", [None])[0]
-
-        if raw_step is not None and str(raw_step).strip().isdigit():
-            step = int(raw_step) % 6
-        else:
-            step = None
 
         try:
             node_dir = self._resolve_graph_folder(node_path_param)
-            result = self._find_next_node_bfs(node_dir, step=step)
+            result = self._find_next_node(node_dir, current_path=node_path_param)
             self._send_json(200, result)
         except Exception as e:
             self._send_json(400, {"error": str(e)})
@@ -1429,8 +1344,6 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             info_file = canonical_dir / "info.md"
 
             self._update_status_in_info_md(info_file, status)
-            if status == "completed":
-                self._record_node_completion(node_dir)
             print(f"[Status Saved in info.md]: {info_file} -> {status}")
 
             self._send_json(200, {
