@@ -116,6 +116,13 @@ class TestOverflowMenuAndTags(unittest.TestCase):
             f"Expected .graph-parent-anchor z-index ({parent_z}) to be greater than .graph-children-anchor ({children_z})"
         )
 
+    def test_progress_pill_structure_and_stats(self):
+        """Verify progress pill contains count element, updates completed/total beside progress, and has CSS styles."""
+        self.assertIn('id="overall-progress-count"', self.html_content)
+        self.assertIn('id="overall-progress-text"', self.html_content)
+        self.assertIn('overall-progress-count', self.js_content)
+        self.assertIn('.progress-pill-count', self.css_content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -193,6 +193,7 @@
 
   async function updateProgressStats() {
     const progressFill = document.getElementById('overall-progress-fill');
+    const progressCount = document.getElementById('overall-progress-count');
     const progressText = document.getElementById('overall-progress-text');
     const progressPill = document.getElementById('overall-progress-pill');
 
@@ -201,10 +202,13 @@
       if (res.ok) {
         const data = await res.json();
         const percent = data.percent || 0;
+        const completed = data.completed || 0;
+        const total = data.total || 0;
         if (progressFill) progressFill.style.width = percent + '%';
-        if (progressText) progressText.textContent = `${percent}%`;
+        if (progressCount) progressCount.textContent = `${completed}/${total}`;
+        if (progressText) progressText.textContent = progressCount ? `(${percent}%)` : `${percent}%`;
         if (progressPill) {
-          let tooltip = `${data.completed}/${data.total} Completed (${percent}%)`;
+          let tooltip = `${completed}/${total} Completed (${percent}%)`;
           if (data.needsReview) {
             tooltip += ` • ${data.needsReview} Need Review`;
           }

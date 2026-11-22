@@ -457,12 +457,13 @@ body {
 .progress-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   padding: 4px 10px;
   border-radius: 20px;
   font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .progress-pill-bar {
@@ -471,6 +472,7 @@ body {
   background: var(--bg-primary);
   border-radius: 3px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .progress-pill-fill {
@@ -480,9 +482,15 @@ body {
   transition: width 0.3s ease;
 }
 
-.progress-pill-text {
+.progress-pill-count {
   font-family: var(--font-mono);
   font-weight: 600;
+  color: var(--text-primary);
+}
+
+.progress-pill-text {
+  font-family: var(--font-mono);
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
