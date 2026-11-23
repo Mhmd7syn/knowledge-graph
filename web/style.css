@@ -1732,17 +1732,27 @@ body {
   font-size: 0.78rem;
   cursor: pointer;
   font-family: var(--font-mono);
+  transition: all 0.15s ease;
 }
 
 .btn-tool:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: var(--accent-blue, #3b82f6);
+}
+
+.editor-stats {
+  margin-left: auto;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  user-select: none;
 }
 
 .editor-shortcut-hint {
-  margin-left: auto;
   font-size: 0.75rem;
   color: var(--text-muted);
+  user-select: none;
 }
 
 .summary-editor-textarea {
@@ -1752,9 +1762,12 @@ body {
   color: var(--text-primary);
   border: none;
   padding: 20px 24px;
-  font-family: var(--font-mono);
-  font-size: 0.92rem;
-  line-height: 1.55;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", var(--font-mono);
+  font-size: 0.94rem;
+  line-height: 1.6;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  caret-color: var(--accent-blue, #3b82f6);
   resize: none;
   outline: none;
   user-select: text;

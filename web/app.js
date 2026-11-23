@@ -1226,6 +1226,7 @@
 
     textarea.value = content;
     lastSavedContent = content;
+    updateEditorStats();
     setAutosaveStatus('saved');
     renderMarkdownContent(content, previewEl);
     switchEditorMode('preview');
@@ -1279,6 +1280,7 @@
       previewView.style.display = 'none';
       editorView.style.display = 'flex';
       textarea.focus();
+      updateEditorStats();
     } else {
       btnPreview.classList.add('active');
       btnEdit.classList.remove('active');
@@ -1507,34 +1509,382 @@
     }
   }
 
+  function updateEditorStats() {
+    const statsEl = document.getElementById('editor-stats');
+    const textarea = document.getElementById('md-textarea');
+    if (!statsEl || !textarea) return;
+    const text = textarea.value.trim();
+    const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+    const lines = textarea.value ? textarea.value.split('\n').length : 0;
+    statsEl.textContent = `${words} ${words === 1 ? 'word' : 'words'} · ${lines} ${lines === 1 ? 'line' : 'lines'}`;
+  }
+
   function insertEditorFormatting(tool) {
     const textarea = document.getElementById('md-textarea');
+    if (!textarea) return;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const selected = textarea.value.substring(start, end);
 
+    if (tool === 'list') {
+      const lineStart = textarea.value.lastIndexOf('\n', start - 1) + 1;
+      const nextNewline = textarea.value.indexOf('\n', end);
+      const lineEnd = nextNewline === -1 ? textarea.value.length : nextNewline;
+      const block = textarea.value.substring(lineStart, lineEnd);
+      const lines = block.split('\n');
+      const allList = lines.every(l => /^\s*[-*+]\s/.test(l));
+      const modified = lines.map(l => {
+        if (allList) return l.replace(/^(\s*)[-*+]\s/, '$1');
+        if (/^\s*[-*+]\s/.test(l)) return l;
+        return `- ${l}`;
+      }).join('\n');
+      textarea.setRangeText(modified, lineStart, lineEnd, 'preserve');
+      textarea.selectionStart = lineStart;
+      textarea.selectionEnd = lineStart + modified.length;
+      textarea.focus();
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    if (tool === 'check') {
+      const lineStart = textarea.value.lastIndexOf('\n', start - 1) + 1;
+      const nextNewline = textarea.value.indexOf('\n', end);
+      const lineEnd = nextNewline === -1 ? textarea.value.length : nextNewline;
+      const block = textarea.value.substring(lineStart, lineEnd);
+      const lines = block.split('\n');
+      const allCheck = lines.every(l => /^\s*[-*+]\s+\[[ xX]\]\s/.test(l));
+      const modified = lines.map(l => {
+        if (allCheck) return l.replace(/^(\s*[-*+]\s+)\[[ xX]\]\s/, '$1');
+        if (/^\s*[-*+]\s+\[[ xX]\]\s/.test(l)) return l;
+        if (/^\s*[-*+]\s/.test(l)) return l.replace(/^(\s*[-*+]\s)/, '$1[ ] ');
+        return `- [ ] ${l}`;
+      }).join('\n');
+      textarea.setRangeText(modified, lineStart, lineEnd, 'preserve');
+      textarea.selectionStart = lineStart;
+      textarea.selectionEnd = lineStart + modified.length;
+      textarea.focus();
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
     let replacement = '';
     switch (tool) {
       case 'bold':
-        replacement = `**${selected || 'bold text'}**`;
+        if (selected.startsWith('**') && selected.endsWith('**') && selected.length >= 4) {
+          replacement = selected.slice(2, -2);
+        } else {
+          replacement = `**${selected || 'bold text'}**`;
+        }
+        break;
+      case 'italic':
+        if (selected.startsWith('*') && selected.endsWith('*') && selected.length >= 2) {
+          replacement = selected.slice(1, -1);
+        } else {
+          replacement = `*${selected || 'italic text'}*`;
+        }
         break;
       case 'code':
-        replacement = selected.includes('\n') ? `\`\`\`python\n${selected || '# code'}\n\`\`\`` : `\`${selected || 'code'}\``;
+        if (selected.includes('\n')) {
+          replacement = `\`\`\`python\n${selected || '# code'}\n\`\`\``;
+        } else if (selected.startsWith('`') && selected.endsWith('`') && selected.length >= 2) {
+          replacement = selected.slice(1, -1);
+        } else {
+          replacement = `\`${selected || 'code'}\``;
+        }
         break;
       case 'math':
         replacement = selected ? `$${selected}$` : `$$\n\\mathcal{O}(N \\log N)\n$$`;
         break;
-      case 'list':
-        replacement = `\n- ${selected || 'Item'}\n`;
-        break;
-      case 'check':
-        replacement = `\n- [ ] ${selected || 'Task milestone'}\n`;
-        break;
+      default:
+        return;
     }
 
     textarea.setRangeText(replacement, start, end, 'end');
     textarea.focus();
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function setupMarkdownEditor(textarea) {
+    if (!textarea || textarea.dataset.editorInitialized === 'true') return;
+    textarea.dataset.editorInitialized = 'true';
+
+    const WRAP_PAIRS = {
+      '(': ')',
+      '[': ']',
+      '{': '}',
+      '"': '"',
+      "'": "'",
+      '`': '`',
+      '*': '*',
+      '_': '_',
+      '~': '~',
+      '$': '$'
+    };
+
+    const AUTO_CLOSE_PAIRS = {
+      '(': ')',
+      '[': ']',
+      '{': '}',
+      '"': '"',
+      '`': '`',
+      '$': '$'
+    };
+
+    function handleTab(e) {
+      e.preventDefault();
+      const val = textarea.value;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+
+      const firstLineStart = val.lastIndexOf('\n', start - 1) + 1;
+      const nextNewline = val.indexOf('\n', end);
+      const lastLineEnd = nextNewline === -1 ? val.length : nextNewline;
+      const isMultiLine = start !== end && val.substring(start, end).includes('\n');
+
+      if (e.shiftKey) {
+        // Shift+Tab -> Outdent (remove up to 2 leading spaces from line(s))
+        const block = val.substring(firstLineStart, lastLineEnd);
+        const lines = block.split('\n');
+        let removedFirstLine = 0;
+        let totalRemoved = 0;
+
+        const modifiedLines = lines.map((line, idx) => {
+          let count = 0;
+          if (line.startsWith('  ')) count = 2;
+          else if (line.startsWith(' ') || line.startsWith('\t')) count = 1;
+
+          if (count > 0) {
+            if (idx === 0) removedFirstLine = count;
+            totalRemoved += count;
+            return line.substring(count);
+          }
+          return line;
+        });
+
+        const replacement = modifiedLines.join('\n');
+        textarea.setRangeText(replacement, firstLineStart, lastLineEnd, 'preserve');
+        textarea.selectionStart = Math.max(firstLineStart, start - removedFirstLine);
+        textarea.selectionEnd = Math.max(textarea.selectionStart, end - totalRemoved);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // Tab -> Indent
+      if (isMultiLine) {
+        const block = val.substring(firstLineStart, lastLineEnd);
+        const lines = block.split('\n');
+        const replacement = lines.map(l => '  ' + l).join('\n');
+        textarea.setRangeText(replacement, firstLineStart, lastLineEnd, 'preserve');
+        textarea.selectionStart = start + 2;
+        textarea.selectionEnd = end + (lines.length * 2);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // Single line
+      const currentLine = val.substring(firstLineStart, lastLineEnd);
+      const bulletMatch = currentLine.match(/^(\s*)([-*+]|\d+\.)(\s+(?:\[[ xX]\]\s+)?)/);
+
+      if (bulletMatch) {
+        // Line has a bullet: add 2 spaces before the bullet at the start of the line
+        textarea.setRangeText('  ', firstLineStart, firstLineStart, 'end');
+        const newPos = start + 2;
+        textarea.selectionStart = newPos;
+        textarea.selectionEnd = newPos;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        // Plain text: insert 2 spaces at cursor position
+        textarea.setRangeText('  ', start, end, 'end');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
+    function handleEnter(e) {
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const val = textarea.value;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+
+      const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+      const nextNewline = val.indexOf('\n', start);
+      const lineEnd = nextNewline === -1 ? val.length : nextNewline;
+      const currentLine = val.substring(lineStart, lineEnd);
+      const col = start - lineStart;
+
+      // 1. Task/Checkbox list item: e.g. "  - [ ] task" or "  * [x] task"
+      const taskMatch = currentLine.match(/^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/);
+      if (taskMatch) {
+        const indent = taskMatch[1];
+        const bullet = taskMatch[2];
+        const itemText = taskMatch[4];
+
+        if (col === 0) return;
+
+        e.preventDefault();
+        // If empty task item (e.g. "- [ ] " with no text)
+        if (itemText.trim() === '') {
+          textarea.setRangeText('', lineStart, lineEnd, 'end');
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          return;
+        }
+
+        const nextBullet = `\n${indent}${bullet} [ ] `;
+        textarea.setRangeText(nextBullet, start, end, 'end');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // 2. Unordered bullet list item: e.g. "  - item" or "  * item" or "  + item"
+      const bulletMatch = currentLine.match(/^(\s*)([-*+])\s*(.*)$/);
+      if (bulletMatch) {
+        const indent = bulletMatch[1];
+        const bullet = bulletMatch[2];
+        const itemText = bulletMatch[3];
+
+        if (col === 0) return;
+
+        e.preventDefault();
+        // If empty bullet (e.g. "- " with no text)
+        if (itemText.trim() === '') {
+          if (indent.length >= 2) {
+            const unindented = indent.substring(2) + bullet + ' ';
+            textarea.setRangeText(unindented, lineStart, lineEnd, 'end');
+          } else {
+            textarea.setRangeText('', lineStart, lineEnd, 'end');
+          }
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          return;
+        }
+
+        const nextBullet = `\n${indent}${bullet} `;
+        textarea.setRangeText(nextBullet, start, end, 'end');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // 3. Numbered list item: e.g. "  1. item"
+      const numMatch = currentLine.match(/^(\s*)(\d+)\.\s*(.*)$/);
+      if (numMatch) {
+        const indent = numMatch[1];
+        const num = parseInt(numMatch[2], 10);
+        const itemText = numMatch[3];
+
+        if (col === 0) return;
+
+        e.preventDefault();
+        if (itemText.trim() === '') {
+          textarea.setRangeText('', lineStart, lineEnd, 'end');
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          return;
+        }
+
+        const nextBullet = `\n${indent}${num + 1}. `;
+        textarea.setRangeText(nextBullet, start, end, 'end');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+    }
+
+    textarea.addEventListener('keydown', (e) => {
+      const val = textarea.value;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+
+      // Tab / Shift+Tab indent and outdent
+      if (e.key === 'Tab') {
+        handleTab(e);
+        return;
+      }
+
+      // Enter key (auto-continue or clear list bullet)
+      if (e.key === 'Enter') {
+        handleEnter(e);
+        return;
+      }
+
+      // Shortcut: Ctrl+B / Cmd+B (Bold)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        insertEditorFormatting('bold');
+        return;
+      }
+
+      // Shortcut: Ctrl+I / Cmd+I (Italic)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        insertEditorFormatting('italic');
+        return;
+      }
+
+      // Shortcut: Ctrl+` (Code)
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        insertEditorFormatting('code');
+        return;
+      }
+
+      // Shortcut: Ctrl+S / Cmd+S (Quick Save)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveMarkdownToDisk();
+        return;
+      }
+
+      // Selection Auto-Wrap
+      if (start !== end && WRAP_PAIRS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const open = e.key;
+        const close = WRAP_PAIRS[e.key];
+        const selected = val.substring(start, end);
+        textarea.setRangeText(open + selected + close, start, end, 'preserve');
+        textarea.selectionStart = start + open.length;
+        textarea.selectionEnd = end + open.length;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // Auto-close pairs when typing without selection
+      if (start === end && AUTO_CLOSE_PAIRS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (val[start] === e.key && ['"', '`', '$'].includes(e.key)) {
+          e.preventDefault();
+          textarea.selectionStart = start + 1;
+          textarea.selectionEnd = start + 1;
+          return;
+        }
+        e.preventDefault();
+        const open = e.key;
+        const close = AUTO_CLOSE_PAIRS[e.key];
+        textarea.setRangeText(open + close, start, end, 'end');
+        textarea.selectionStart = start + open.length;
+        textarea.selectionEnd = start + open.length;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
+      // Step over closing brackets
+      if (start === end && [')', ']', '}'].includes(e.key) && val[start] === e.key) {
+        e.preventDefault();
+        textarea.selectionStart = start + 1;
+        textarea.selectionEnd = start + 1;
+        return;
+      }
+
+      // Smart Backspace inside empty pair
+      if (e.key === 'Backspace' && start === end && start > 0) {
+        const prevChar = val[start - 1];
+        const nextChar = val[start];
+        if (WRAP_PAIRS[prevChar] && WRAP_PAIRS[prevChar] === nextChar) {
+          e.preventDefault();
+          textarea.setRangeText('', start - 1, start + 1, 'end');
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          return;
+        }
+      }
+    });
+
+    textarea.addEventListener('input', updateEditorStats);
+    updateEditorStats();
   }
 
   // ---------------------------------------------------------------------------
@@ -2970,6 +3320,7 @@
     // Auto-save on textarea input and blur
     const mdTextarea = document.getElementById('md-textarea');
     if (mdTextarea) {
+      setupMarkdownEditor(mdTextarea);
       mdTextarea.addEventListener('input', scheduleAutoSave);
       mdTextarea.addEventListener('blur', () => {
         if (mdTextarea.value !== lastSavedContent) {

@@ -175,11 +175,13 @@
         <!-- Markdown Source Code Editor -->
         <div class="markdown-editor-pane" id="md-editor-view" style="display: none;">
           <div class="editor-toolbar">
-            <button type="button" class="btn-tool" data-tool="bold" title="Bold">**B**</button>
-            <button type="button" class="btn-tool" data-tool="code" title="Code Block">`Code`</button>
-            <button type="button" class="btn-tool" data-tool="math" title="Math Formula">$Math$</button>
-            <button type="button" class="btn-tool" data-tool="list" title="Bullet List">• List</button>
+            <button type="button" class="btn-tool" data-tool="bold" title="Bold (Ctrl+B)">**B**</button>
+            <button type="button" class="btn-tool" data-tool="italic" title="Italic (Ctrl+I)">*I*</button>
+            <button type="button" class="btn-tool" data-tool="code" title="Code Block (Ctrl+`)">`Code`</button>
+            <button type="button" class="btn-tool" data-tool="math" title="Math Formula ($)">$Math$</button>
+            <button type="button" class="btn-tool" data-tool="list" title="Bullet List (Tab to indent)">• List</button>
             <button type="button" class="btn-tool" data-tool="check" title="Task List">☑ Task</button>
+            <span class="editor-stats" id="editor-stats">0 words · 0 lines</span>
             <span class="editor-shortcut-hint">Auto-saved</span>
           </div>
           <textarea class="summary-editor-textarea" id="md-textarea" dir="auto" spellcheck="false" placeholder="Write markdown content..."></textarea>
