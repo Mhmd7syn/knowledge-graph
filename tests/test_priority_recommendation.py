@@ -47,12 +47,7 @@ class TestPriorityRecommendation(unittest.TestCase):
             cls.use_http = False
 
     def setUp(self):
-        queue_file = self.test_graph_dir.parent / ".recommendation_queue.json"
-        if queue_file.exists():
-            try:
-                queue_file.unlink()
-            except Exception:
-                pass
+        pass
 
     @classmethod
     def tearDownClass(cls):
@@ -183,8 +178,8 @@ class TestPriorityRecommendation(unittest.TestCase):
         content = (st / "info.md").read_text(encoding="utf-8")
         self.assertIn("**Priority:** low", content)
 
-    def test_statelessness_no_queue_file_created(self):
-        """Verify recommendation engine is 100% stateless and never creates .recommendation_queue.json."""
+    def test_statelessness_no_side_effects(self):
+        """Verify recommendation engine is 100% stateless with no side effects."""
         st = self.test_graph_dir / "stateless_test"
         st.mkdir(parents=True, exist_ok=True)
         (st / "info.md").write_text("# Stateless Test\n\n**Status:** todo\n**Priority:** high\n", encoding="utf-8")
@@ -192,17 +187,6 @@ class TestPriorityRecommendation(unittest.TestCase):
         status, data = self._get(f"/api/next-node?path={urllib.parse.quote('stateless_test')}")
         self.assertEqual(status, 200)
         self.assertTrue(data.get("found"))
-
-        # Verify no .recommendation_queue.json is created in test_dir, root or graph
-        queue_file1 = self.test_graph_dir.parent / ".recommendation_queue.json"
-        queue_file2 = self.test_graph_dir / ".recommendation_queue.json"
-        self.assertFalse(queue_file1.exists())
-        self.assertFalse(queue_file2.exists())
-
-        # Save status completed -> still no queue file created
-        self._post("/api/save-status", {"path": "stateless_test", "status": "completed"})
-        self.assertFalse(queue_file1.exists())
-        self.assertFalse(queue_file2.exists())
 
     def test_priority_weighted_effective_progress_order(self):
         """

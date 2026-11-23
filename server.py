@@ -591,7 +591,6 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             "badge": badge,
             "status": status,
             "priority": priority,
-            "tier": None,
             "isShortcut": is_shortcut,
             "canonicalRelPath": canonical_rel if is_shortcut else rel_path,
             "relPath": rel_path,
@@ -1104,10 +1103,7 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
                     m_notes = m_canonical / "notes.md"
                     modal_version = int((m_info.stat().st_mtime if m_info.exists() else 0) + (m_notes.stat().st_mtime if m_notes.exists() else 0))
 
-            queue_file = self._get_queue_file()
-            q_mtime = int(queue_file.stat().st_mtime) if queue_file.exists() else 0
-
-            version_token = f"{sum(mtimes)}:{len(mtimes)}:{modal_version}:{q_mtime}"
+            version_token = f"{sum(mtimes)}:{len(mtimes)}:{modal_version}"
             self._send_json(200, {"version": version_token})
         except Exception as e:
             self._send_json(400, {"error": str(e)})
