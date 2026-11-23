@@ -704,7 +704,7 @@
       const dot = childEl.querySelector('.child-status-dot');
       if (dot) {
         dot.className = `child-status-dot ${s}`;
-        dot.title = `Status: ${s}. Click to cycle`;
+        dot.title = `Status: ${s}`;
       }
       const spline = document.querySelector(`.graph-svg-path[data-child-rel-path="${childRelPath}"]`);
       if (spline) {
@@ -726,7 +726,7 @@
         const label = p === 'high' ? '▲ High' : (p === 'low' ? '▼ Low' : 'normal');
         pBtn.className = `child-priority-badge priority-${p}`;
         pBtn.textContent = label;
-        pBtn.title = `Priority: ${p}. Click to change`;
+        pBtn.title = `Priority: ${p}`;
       }
     }
 
@@ -980,11 +980,10 @@
     children.forEach((child, index) => {
       const childStatus = child.status || 'todo';
       const childPriority = child.priority || 'normal';
-      const branchBadge = child.hasChildren ? '<span class="child-branch-indicator" title="Contains sub-stations">⑂</span>' : '';
       const isChildShortcut = child.isShortcut || false;
       const shortcutIndicator = isChildShortcut ? `<span class="child-shortcut-indicator" title="Shortcut to ${child.canonicalRelPath || child.title}">↗</span>` : '';
       const priorityLabel = childPriority === 'high' ? '▲ High' : (childPriority === 'low' ? '▼ Low' : 'normal');
-      const priorityBadge = `<button type="button" class="child-priority-badge priority-${childPriority}" title="Priority: ${childPriority}. Click to change">${priorityLabel}</button>`;
+      const priorityBadge = `<span class="child-priority-badge priority-${childPriority}" title="Priority: ${childPriority}">${priorityLabel}</span>`;
 
       const nodeEl = document.createElement('div');
       nodeEl.className = `graph-child-node ${isChildShortcut ? 'is-shortcut' : ''} ${direction === 'forward' ? 'spawning' : ''}`;
@@ -999,45 +998,12 @@
           : (childStatus === 'needs-review' ? 'needs-review' : 'todo'));
 
       nodeEl.innerHTML = `
-        <span class="child-status-dot ${dotClass}" title="Status: ${childStatus}. Click to cycle"></span>
+        <span class="child-status-dot ${dotClass}" title="Status: ${childStatus}"></span>
         <span class="child-index">${String(index + 1).padStart(2, '0')}</span>
         <span class="child-node-title" title="${child.title}">${child.title}</span>
         ${priorityBadge}
         ${shortcutIndicator}
-        ${branchBadge}
-        <button class="btn-child-quick-info" title="Quick view info.md">ℹ️</button>
       `;
-
-      // Quick Status Cycle on Child Dot
-      const statusDotEl = nodeEl.querySelector('.child-status-dot');
-      if (statusDotEl) {
-        statusDotEl.onclick = (e) => {
-          e.stopPropagation();
-          const nextMap = { 'todo': 'in-progress', 'in-progress': 'completed', 'completed': 'todo', 'needs-review': 'completed' };
-          const curStatus = child.status || 'todo';
-          setChildStatus(child.relPath, nextMap[curStatus] || 'todo');
-        };
-      }
-
-      // Quick Priority Cycle Button
-      const prioBtn = nodeEl.querySelector('.child-priority-badge');
-      if (prioBtn) {
-        prioBtn.onclick = (e) => {
-          e.stopPropagation();
-          const nextMap = { 'normal': 'high', 'high': 'low', 'low': 'normal' };
-          const curPrio = child.priority || 'normal';
-          setChildPriority(child.relPath, nextMap[curPrio] || 'normal');
-        };
-      }
-
-      // Quick Info Button opens info.md
-      const quickBtn = nodeEl.querySelector('.btn-child-quick-info');
-      if (quickBtn) {
-        quickBtn.onclick = (e) => {
-          e.stopPropagation();
-          openMarkdownModal(child.relPath, 'info');
-        };
-      }
 
       // Clicking child drills down into it
       nodeEl.onclick = () => {
