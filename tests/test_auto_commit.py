@@ -29,15 +29,25 @@ from server import GraphRequestHandler, find_available_port, _auto_commit_statio
 
 def _rmtree_force(path):
     """Recursively remove a directory tree, clearing Windows read-only flags (e.g. .git objects)."""
-    def on_rm_error(func, p, exc):
+    def on_rm_error(*args):
+        # Python < 3.12: onerror(func, path, exc_info)
+        # Python >= 3.12: onexc(func, path, exc)
         try:
+            func = args[0]
+            p = args[1]
             os.chmod(p, stat.S_IWRITE)
             func(p)
         except Exception:
             pass
 
     if Path(path).exists():
-        shutil.rmtree(path, onexc=on_rm_error)
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=on_rm_error)
+            else:
+                shutil.rmtree(path, onerror=on_rm_error)
+        except Exception:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 class TestAutoCommit(unittest.TestCase):
