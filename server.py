@@ -20,6 +20,7 @@ import math
 import socket
 import base64
 import shutil
+import subprocess
 import urllib.parse
 from pathlib import Path
 from collections import deque
@@ -49,6 +50,87 @@ def ensure_graph_initialized():
                 shutil.copytree(item, dest, dirs_exist_ok=True)
             else:
                 shutil.copy2(item, dest)
+
+
+def _auto_commit_station_completion(station_dir: Path, station_name: str = "", graph_dir: Path = None):
+    """
+    Fault-tolerant auto-commit on station completion strictly scoped to GRAPH_DIR.
+    Silently no-ops if GRAPH_DIR is not an active, initialized Git repository.
+    Guarantees that the root repository is never committed or modified.
+    """
+    target_graph_dir = graph_dir or GRAPH_DIR
+    try:
+        if not target_graph_dir or not target_graph_dir.exists():
+            return
+        git_dir = target_graph_dir / ".git"
+        if not git_dir.exists():
+            return
+
+        rev_parse = subprocess.run(
+            ["git", "-C", str(target_graph_dir), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if rev_parse.returncode != 0 or rev_parse.stdout.strip() != "true":
+            return
+
+        toplevel_res = subprocess.run(
+            ["git", "-C", str(target_graph_dir), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if toplevel_res.returncode != 0:
+            return
+        top_path = Path(toplevel_res.stdout.strip()).resolve()
+        if str(top_path).lower() != str(target_graph_dir.resolve()).lower():
+            return
+
+        resolved_station = station_dir.resolve()
+        resolved_graph = target_graph_dir.resolve()
+        try:
+            rel_station_path = resolved_station.relative_to(resolved_graph).as_posix()
+        except ValueError:
+            return
+
+        if not rel_station_path or rel_station_path == ".":
+            rel_station_path = "."
+
+        name = station_name or station_dir.name or "root"
+
+        subprocess.run(
+            ["git", "-C", str(target_graph_dir), "add", rel_station_path],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        diff_res = subprocess.run(
+            ["git", "-C", str(target_graph_dir), "diff", "--cached", "--quiet"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if diff_res.returncode == 0:
+            return
+        if diff_res.returncode != 1:
+            print(f"[Auto-Commit Warning]: git diff --cached check returned {diff_res.returncode}: {diff_res.stderr.strip()}")
+            return
+
+        commit_res = subprocess.run(
+            ["git", "-C", str(target_graph_dir), "commit", "-m", f"feat(progress): complete {name}"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if commit_res.returncode == 0:
+            print(f"[Auto-Commit]: Committed station completion: feat(progress): complete {name}")
+        else:
+            print(f"[Auto-Commit Warning]: git commit returned {commit_res.returncode}: {commit_res.stderr.strip()}")
+
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        print(f"[Auto-Commit Warning]: Auto-commit failed: {e}")
 
 
 class GraphRequestHandler(SimpleHTTPRequestHandler):
@@ -1346,6 +1428,10 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             self._update_status_in_info_md(info_file, status)
             print(f"[Status Saved in info.md]: {info_file} -> {status}")
 
+            if isinstance(status, str) and status.strip().lower() == "completed":
+                station_name = canonical_dir.name or "root"
+                self._auto_commit_station_completion(canonical_dir, station_name)
+
             self._send_json(200, {
                 "success": True,
                 "message": f"Status updated to '{status}'",
@@ -1353,6 +1439,9 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json(400, {"error": str(e)})
+
+    def _auto_commit_station_completion(self, station_dir: Path, station_name: str = ""):
+        return _auto_commit_station_completion(station_dir, station_name, graph_dir=GRAPH_DIR)
 
     def _handle_save_priority(self, payload: dict):
         raw_path = payload.get("path", "")
