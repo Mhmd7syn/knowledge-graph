@@ -68,14 +68,13 @@ class TestOverflowMenuAndTags(unittest.TestCase):
             "Escape handler must close open overflow dropdown menus"
         )
 
-    def test_child_status_dot_interactivity(self):
-        """Verify child station status dots are interactive and trigger setChildStatus."""
-        self.assertIn("setChildStatus", self.js_content)
+    def test_child_status_dot_read_only(self):
+        """Verify child station status dots are read-only indicators and do not bind click handlers."""
         self.assertIn(".child-status-dot", self.js_content)
         child_dot_click_pattern = r"nodeEl\.querySelector\('\.child-status-dot'\).*setChildStatus"
-        self.assertIsNotNone(
+        self.assertIsNone(
             re.search(child_dot_click_pattern, self.js_content, re.DOTALL),
-            "Child status dots must bind click handler calling setChildStatus"
+            "Child status dots must not bind click handlers to prevent accidental edits"
         )
 
     def test_css_minimized_pill_tag_styles(self):
@@ -87,10 +86,10 @@ class TestOverflowMenuAndTags(unittest.TestCase):
         self.assertIn(".modal-badge-pill", self.css_content)
 
     def test_css_child_status_dot_cursor_and_hover(self):
-        """Verify CSS sets pointer cursor and hover scaling on child status dots."""
+        """Verify CSS sets pointer-events: none on child status dots."""
         dot_section = re.search(r'\.child-status-dot\s*\{[^}]*\}', self.css_content)
         self.assertIsNotNone(dot_section, ".child-status-dot rule must exist in style.css")
-        self.assertIn("cursor: pointer;", dot_section.group(0))
+        self.assertIn("pointer-events: none;", dot_section.group(0))
 
     def test_css_overflow_dropdown_menu_styles(self):
         """Verify CSS defines proper positioning, clipping protection, and animation for dropdowns."""
