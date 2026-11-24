@@ -34,6 +34,7 @@ GRAPH_DIR = Path(os.getenv("GRAPH_DIR", BASE_DIR / "graph")).resolve()
 TEMPLATE_DIR = BASE_DIR / "graph.template"
 CORE_NODE_FILES = {"info.md", "notes.md", "shortcut.json"}
 IGNORED_SYSTEM_FILES = {".DS_Store", "desktop.ini", "Thumbs.db", "AGENTS.md", "agents.md", "agent.md"}
+PROTECTED_NODE_FILES_LOWER = {f.lower() for f in (CORE_NODE_FILES | IGNORED_SYSTEM_FILES)}
 REVIEW_DECAY_DAYS = 30  # 1 month spaced repetition decay threshold
 
 
@@ -345,7 +346,7 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
         extra_files = []
         if canonical_folder.exists() and canonical_folder.is_dir():
             for f in sorted(canonical_folder.iterdir(), key=lambda x: x.name.lower()):
-                if f.is_file() and f.name not in CORE_NODE_FILES and f.name not in IGNORED_SYSTEM_FILES and not f.name.startswith("."):
+                if f.is_file() and f.name.lower() not in PROTECTED_NODE_FILES_LOWER and not f.name.startswith("."):
                     rel_to_graph = f.relative_to(GRAPH_DIR).as_posix()
                     extra_files.append({
                         "label": f.name,
@@ -852,7 +853,7 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             # 4. Extra files match (Smallest Score)
             if not matched:
                 for f in files:
-                    if f not in CORE_NODE_FILES and f not in IGNORED_SYSTEM_FILES and not f.startswith("."):
+                    if f.lower() not in PROTECTED_NODE_FILES_LOWER and not f.startswith("."):
                         if q_lower in f.lower():
                             best_match = {
                                 "matchType": "file",
@@ -1483,13 +1484,30 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
             return
 
         safe_filename = Path(filename).name
-        if not safe_filename or safe_filename in CORE_NODE_FILES or safe_filename in IGNORED_SYSTEM_FILES:
+        if (
+            not safe_filename
+            or safe_filename.startswith(".")
+            or safe_filename.lower() in PROTECTED_NODE_FILES_LOWER
+        ):
             self._send_json(400, {"error": "Invalid filename or cannot overwrite core node files"})
             return
 
         try:
             node_dir = self._resolve_graph_folder(raw_path)
             canonical_dir, _, _ = self._resolve_shortcut(node_dir)
+
+            if canonical_dir.exists() and canonical_dir.is_dir():
+                for existing in canonical_dir.iterdir():
+                    if existing.name.lower() == safe_filename.lower():
+                        if existing.is_dir():
+                            self._send_json(400, {"error": f"A directory with name '{existing.name}' already exists"})
+                            return
+                        if existing.name != safe_filename:
+                            self._send_json(400, {
+                                "error": f"Filename '{safe_filename}' collides with existing file '{existing.name}'"
+                            })
+                            return
+
             target_file = canonical_dir / safe_filename
 
             if "," in b64_content:
@@ -1619,7 +1637,7 @@ class GraphRequestHandler(SimpleHTTPRequestHandler):
 
             # Canonical station deletion checks
             subdirs = [d for d in target_dir.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]
-            extra_files = [f for f in target_dir.iterdir() if f.is_file() and f.name not in CORE_NODE_FILES and f.name not in IGNORED_SYSTEM_FILES and not f.name.startswith(".")]
+            extra_files = [f for f in target_dir.iterdir() if f.is_file() and f.name.lower() not in PROTECTED_NODE_FILES_LOWER and not f.name.startswith(".")]
             referencing_shortcuts = self._find_referencing_shortcuts(rel_path)
 
             has_dependents = bool(subdirs or extra_files or referencing_shortcuts)
