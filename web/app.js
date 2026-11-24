@@ -1227,7 +1227,6 @@
     textarea.value = content;
     lastSavedContent = content;
     updateEditorStats();
-    setAutosaveStatus('saved');
     renderMarkdownContent(content, previewEl);
     switchEditorMode('preview');
 
@@ -1293,6 +1292,47 @@
     }
   }
 
+  const BIDI_STRONG_RE = /([\u0590-\u05FF\u0621-\u064A\u066E-\u06D3\u06D5\u06EE-\u06EF\u06FA-\u06FC\u06FF\u0750-\u077F\u08A0-\u08D2\u200F\uFB1D-\uFDFD\uFE70-\uFEFC])|([A-Za-z\u00C0-\u02B8\u0370-\u052F\u1E00-\u1EFF])/;
+
+  function findStrongDirectionInNode(root, { skipCode = true, skipNestedLists = true } = {}) {
+    function walk(node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const match = (node.nodeValue || '').match(BIDI_STRONG_RE);
+        if (match) return match[1] ? 'rtl' : 'ltr';
+        return null;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+      const tag = node.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'SVG') return null;
+      if (skipCode && (tag === 'CODE' || tag === 'PRE')) return null;
+      if (skipNestedLists && node !== root && (tag === 'UL' || tag === 'OL' || tag === 'MENU')) return null;
+
+      if (node !== root) {
+        const explicit = node.getAttribute('dir');
+        if (explicit === 'rtl' || explicit === 'ltr') return explicit;
+      }
+
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        const dir = walk(child);
+        if (dir) return dir;
+      }
+      return null;
+    }
+
+    return walk(root);
+  }
+
+  function detectBlockDirection(el) {
+    const isListItem = el.tagName === 'LI';
+    return (
+      findStrongDirectionInNode(el, { skipCode: true, skipNestedLists: isListItem }) ||
+      findStrongDirectionInNode(el, { skipCode: false, skipNestedLists: isListItem }) ||
+      (isListItem ? findStrongDirectionInNode(el, { skipCode: false, skipNestedLists: false }) : null) ||
+      'auto'
+    );
+  }
+
   function renderMarkdownContent(markdownText, targetEl) {
     let html = '';
     if (window.marked && typeof window.marked.parse === 'function') {
@@ -1304,14 +1344,15 @@
     }
 
     targetEl.innerHTML = html;
-    targetEl.setAttribute('dir', 'auto');
 
-    // Apply dir="auto" to block elements for bidirectional (BiDi) text alignment
-    targetEl.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote').forEach(el => {
+    // Resolve explicit rtl/ltr direction per block so nested <p> in loose lists/blockquotes
+    // never hides strong text from dir="auto" on parent <li> or <blockquote>.
+    targetEl.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote, table, td, th').forEach(el => {
       if (!el.getAttribute('dir')) {
-        el.setAttribute('dir', 'auto');
+        el.setAttribute('dir', detectBlockDirection(el));
       }
     });
+    targetEl.setAttribute('dir', detectBlockDirection(targetEl));
 
     // Ensure links open in a new tab without leaving the application
     targetEl.querySelectorAll('a').forEach(a => {
@@ -1363,35 +1404,13 @@
     }
   }
 
-  function setAutosaveStatus(state) {
-    const el = document.getElementById('autosave-status');
-    const textEl = document.getElementById('autosave-text');
-    if (!el || !textEl) return;
-
-    el.classList.remove('saving', 'saved', 'error');
-
-    if (state === 'saving') {
-      el.classList.add('saving');
-      textEl.textContent = 'Saving...';
-    } else if (state === 'saved') {
-      el.classList.add('saved');
-      textEl.textContent = 'Saved';
-    } else if (state === 'error') {
-      el.classList.add('error');
-      textEl.textContent = 'Save failed';
-    }
-  }
-
   function scheduleAutoSave() {
     const textarea = document.getElementById('md-textarea');
     if (!textarea) return;
 
     if (textarea.value === lastSavedContent) {
-      setAutosaveStatus('saved');
       return;
     }
-
-    setAutosaveStatus('saving');
 
     if (autoSaveTimer) {
       clearTimeout(autoSaveTimer);
@@ -1418,7 +1437,6 @@
     const endpoint = docType === 'info' ? '/api/save-info' : '/api/save-notes';
 
     if (content === lastSavedContent && !isSavingMarkdown) {
-      setAutosaveStatus('saved');
       return;
     }
 
@@ -1428,7 +1446,6 @@
     }
 
     isSavingMarkdown = true;
-    setAutosaveStatus('saving');
 
     // 1. Priority: Immediate local patch of the affected card (0ms latency)
     if (docType === 'info') {
@@ -1463,7 +1480,6 @@
       if (res.ok) {
         const data = await res.json();
         lastSavedContent = content;
-        setAutosaveStatus('saved');
         fullGraphTreeData = null;
 
         if (data.node) {
@@ -1496,11 +1512,10 @@
         updateProgressStats();
         updateNextNodeRecommendation(getCurrentRelPath());
       } else {
-        setAutosaveStatus('error');
+        console.warn('Auto-save failed with status:', res.status);
       }
     } catch (err) {
       console.warn('Auto-save error:', err);
-      setAutosaveStatus('error');
     } finally {
       isSavingMarkdown = false;
       if (textarea && textarea.value !== lastSavedContent) {
