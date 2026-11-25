@@ -69,13 +69,12 @@ class TestOverflowMenuAndTags(unittest.TestCase):
         )
 
     def test_child_status_dot_interactivity(self):
-        """Verify child station status dots are interactive and trigger setChildStatus."""
-        self.assertIn("setChildStatus", self.js_content)
+        """Verify child station status dots are read-only and do not bind click handlers to setChildStatus."""
         self.assertIn(".child-status-dot", self.js_content)
         child_dot_click_pattern = r"nodeEl\.querySelector\('\.child-status-dot'\).*setChildStatus"
-        self.assertIsNotNone(
+        self.assertIsNone(
             re.search(child_dot_click_pattern, self.js_content, re.DOTALL),
-            "Child status dots must bind click handler calling setChildStatus"
+            "Child status dots must be read-only and not bind click handler calling setChildStatus"
         )
 
     def test_css_minimized_pill_tag_styles(self):
@@ -87,10 +86,15 @@ class TestOverflowMenuAndTags(unittest.TestCase):
         self.assertIn(".modal-badge-pill", self.css_content)
 
     def test_css_child_status_dot_cursor_and_hover(self):
-        """Verify CSS sets pointer cursor and hover scaling on child status dots."""
+        """Verify CSS sets pointer-events: none and omits cursor: pointer on read-only child status dots."""
         dot_section = re.search(r'\.child-status-dot\s*\{[^}]*\}', self.css_content)
         self.assertIsNotNone(dot_section, ".child-status-dot rule must exist in style.css")
-        self.assertIn("cursor: pointer;", dot_section.group(0))
+        self.assertIn("pointer-events: none;", dot_section.group(0))
+        self.assertNotIn("cursor: pointer;", dot_section.group(0))
+        self.assertIsNone(
+            re.search(r'\.child-status-dot:hover\s*\{', self.css_content),
+            ".child-status-dot:hover rule must not exist on read-only child status dots"
+        )
 
     def test_css_overflow_dropdown_menu_styles(self):
         """Verify CSS defines proper positioning, clipping protection, and animation for dropdowns."""
