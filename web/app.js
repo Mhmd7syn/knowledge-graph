@@ -1909,39 +1909,45 @@
   function openExtraFilesModal(node) {
     if (!node) return;
     const overlay = document.getElementById('extra-files-modal-overlay');
-    const listContainer = document.getElementById('extra-files-list-container') || document.getElementById('extra-files-list');
-    const nodeTitleLabel = document.getElementById('extra-files-node-label');
+    const listContainer = document.getElementById('extra-files-list');
+    const nodeTitleLabel = document.getElementById('extra-files-path');
 
-    nodeTitleLabel.textContent = `${node.title} (graph/${node.relPath || '(root)'})`;
+    if (nodeTitleLabel) {
+      nodeTitleLabel.textContent = `${node.title} (graph/${node.relPath || '(root)'})`;
+    }
 
     const files = node.extraFiles || [];
 
-    if (files.length === 0) {
-      listContainer.innerHTML = `
-        <div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; padding: 12px 0;">
-          No extra files in this folder. Drop PDFs, images, or cheatsheets here.
-        </div>
-      `;
-    } else {
-      listContainer.innerHTML = files.map(f => {
-        const icon = getFileIcon(f.ext);
-        const sizeStr = f.size ? formatBytes(f.size) : '';
-        return `
-          <a href="${f.url}" target="_blank" rel="noopener noreferrer" class="extra-file-item" title="Open ${f.label}">
-            <div class="extra-file-left">
-              <span class="extra-file-icon">${icon}</span>
-              <span class="extra-file-name">${f.label}</span>
-            </div>
-            <div class="extra-file-right">
-              <span class="extra-file-size">${sizeStr}</span>
-              <span class="extra-file-tag">${f.ext || 'FILE'}</span>
-            </div>
-          </a>
+    if (listContainer) {
+      if (files.length === 0) {
+        listContainer.innerHTML = `
+          <div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; padding: 12px 0;">
+            No extra files in this folder. Drop PDFs, images, or cheatsheets here.
+          </div>
         `;
-      }).join('');
+      } else {
+        listContainer.innerHTML = files.map(f => {
+          const icon = getFileIcon(f.ext);
+          const sizeStr = f.size ? formatBytes(f.size) : '';
+          return `
+            <a href="${f.url}" target="_blank" rel="noopener noreferrer" class="extra-file-item" title="Open ${f.label}">
+              <div class="extra-file-left">
+                <span class="extra-file-icon">${icon}</span>
+                <span class="extra-file-name">${f.label}</span>
+              </div>
+              <div class="extra-file-right">
+                <span class="extra-file-size">${sizeStr}</span>
+                <span class="extra-file-tag">${f.ext || 'FILE'}</span>
+              </div>
+            </a>
+          `;
+        }).join('');
+      }
     }
 
-    overlay.classList.add('open');
+    if (overlay) {
+      overlay.classList.add('open');
+    }
   }
 
   function closeExtraFilesModal() {
